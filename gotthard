@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+'''
+DBaaS tunnel
+'''
+
+import click
+import logging
+import yaml
+import os
+import getpass
+import subprocess
+import socket
+import time
+
+CONFIG_DIR_PATH = click.get_app_dir('piu')
+CONFIG_FILE_PATH = os.path.join(CONFIG_DIR_PATH, 'piu.yaml')
+
+
+def load_config(path, **kwargs):
+    try:
+        with open(path, 'rb') as fd:
+            config = yaml.safe_load(fd)
+    except:
+        config = {}
+
+    for k, v in kwargs.items():
+        if v:
+            config[k] = v
+
+    return config
+
+
+@click.command(epilog="""
+Examples:
+
+\b
+    $ ./gotthard 172.31.150.202 pg_isready
+    localhost:50474 - accepting connections
+
+\b
+    $ ./gotthard mydb.team.example.com -- psql -c "SELECT clock_timestamp(), current_user" -XAt
+    2016-06-03 09:21:14.68289+00|myuser
+""")
+
+@click.option('--config-file', '-c', help='Use alternative piu configuration file', default=CONFIG_FILE_PATH,
+              metavar='PATH')
+@click.option('-O', '--odd-host', help='Odd SSH bastion hostname', envvar='ODD_HOST', metavar='HOSTNAME')
+@click.option('-U', '--user', help='Username to use for connecting', envvar='PIU_USER', metavar='NAME')
+@click.option('-p', '--port', help='Remote port to use', default=5432, type=int)
+@click.option('-l', '--local-port', help='The local port to use for the tunnel', type=int, metavar='PORT')
+@click.option('-r', '--reason', help='If specified, request access using REASON', type=str, metavar='REASON')
+@click.option('-o', '--option', help='PIU option to pass on to piu (e.g. -t=1)', type=str, multiple=True)
+@click.option('-v', '--verbose', is_flag=True, help='Enable DEBUG logging')
+@click.argument('remote_host', nargs=1, metavar='DBHOSTNAME')
+@click.argument('command', nargs=-1, metavar='[--] COMMAND [arg1] [argn]')
+def tunnel(config_file, odd_host, user, remote_host, port, command, verbose, local_port, reason, option):
+    """Gotthard allows you to dig a base tunnel. It requires access to your odd host to be able to do its work.
+
+       When specifying a COMMAND, the command specified will be executed and afterwards the tunnel will be closed."""
+
+    loglevel = os.environ.get('LOGLEVEL', 'WARNING').upper() if not verbose else 'DEBUG'
+    logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=loglevel)
+
+    user = user or getpass.getuser()
+    config = load_config(config_file, odd_host=odd_host, username=user)
+
+    logging.debug(config)
+
+    if config.get('odd_host') is None:
+        raise click.ClickException('No odd-host found in configuration')
+
+    if reason or len(option) > 0:
+        piu_cmd = ['piu', '-c', config_file, 'request-access', '-O', config.get('odd_host'), config.get('odd_host')]
+        for o in list(option):
+            piu_cmd += o.split('=', 1)
+        piu_cmd.append(reason)
+        logging.info("Requesting access with piu:\n{}".format(piu_cmd))
+
+        with open('/dev/null', 'r') as devnull:
+            piu = subprocess.Popen(piu_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=devnull)
+            out, err = piu.communicate()
+            logging.debug(out)
+            logging.debug(err)
+
+        if piu.returncode != 0:
+            raise click.ClickException("PIU: {}\nexitcode:{}".format( err.decode('utf-8'), piu.returncode))
+
+    ok, output = test_ssh(config.get('username'), config.get('odd_host'), remote_host, port)
+    if not ok:
+        if 'was revoked by even' in output:
+            raise click.ClickException("""
+You should request access to your odd host using piu.
+For example, to request access for 3 hours to fix an incident:
+
+    piu request-access {odd_host} --lifetime 180 "Fixing incident INC-123"
+
+Optionally, provide the --reason option to autimatically try to get access.
+""".format(**config))
+        else:
+            raise Exception('beer')
+
+    tunnel_port, process = setup_tunnel(config['username'], config['odd_host'], remote_host, port, local_port)
+    if tunnel_port is None:
+        raise click.ClickException("Could not establish tunnel")
+
+    config['pid'] = process.pid
+    config['port'] = port
+    config['tunnel_port'] = tunnel_port
+
+    if not command:
+        click.echo("""\
+Tunnel established, you can now use the tunnel with your favourite tools.
+
+
+Process pid: {pid} is listening on localhost:{tunnel_port}
+
+    psql postgresql://{username}@localhost:{tunnel_port}/postgres?sslmode=require
+    psql "host=localhost port={tunnel_port} user={username} sslmode=require"
+
+WARNING: The ssh process keeps running in the background, so you should make sure to clean up sometimes
+""".format(**config))
+    else:
+        env = {'PATH': os.environ['PATH'],
+               'PGSSLMODE': 'require',
+               'PGHOST': 'localhost',
+               'PGPORT': str(tunnel_port),
+               'PGUSER': user,
+               'PGDATABASE': 'postgres'}
+        subprocess.call(command, env=env)
+
+        logging.info("Terminating ssh tunnel (pid={})".format(process.pid))
+        process.kill()
+
+
+def setup_tunnel(user, odd_host, remote_host, remote_port, tunnel_port):
+    tunnel_port = get_port(tunnel_port)
+
+    if not tunnel_port:
+        raise click.ClickException('Could not get a free local port for listening')
+
+    ssh_command = ['ssh',
+                   '-oExitOnForwardFailure=True',
+                   '-oBatchMode=yes',
+                   '-L', '{}:{}:{}'.format(tunnel_port, remote_host, remote_port),
+                   '{}@{}'.format(user, odd_host),
+                   '-N']
+
+    process = subprocess.Popen(ssh_command)
+    # Give the process some time to come alive
+    time.sleep(0.5)
+
+    logging.debug("Testing if tunnel is listening")
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.connect(('localhost', tunnel_port))
+    except Exception as e:
+        logging.exception(e)
+        logging.warning("Could not connect to tunnel, killing ssh process with pid {}".format(process.pid))
+        process.kill()
+        process, tunnel_port = None, None
+
+    return tunnel_port, process
+
+
+def get_port(port=None):
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(("", port or 0))
+        s.listen(1)
+        port = s.getsockname()[1]
+        s.close()
+    except OSError as oe:
+        if 'Address already in use' in str(oe):
+            raise click.ClickException('Port {} is already in use'.format(port))
+        raise
+    return port
+
+
+def test_ssh(user, odd_host, remote_host, remote_port):
+    logging.debug("Checking if we can connect to the remote host via the odd host")
+    out = ''
+    try:
+        ssh_cmd = ['ssh', '{}@{}'.format(user, odd_host), 'nc -z {} {} -w 2'.format(remote_host, remote_port)]
+        out = subprocess.check_output(ssh_cmd)
+    except subprocess.CalledProcessError as cpe:
+        logging.debug(cpe)
+        raise click.ClickException("""
+Could not establish connection to the remote host and remote port
+Please ensure you can connect to the remote host and remote port from the odd host you specify.
+
+For troubleshooting, test the following command:
+
+{}
+""".format(' '.join(ssh_cmd)))
+
+    except Exception as e:
+        logging.exception(e)
+
+    return out == b'', out.decode("utf-8")
+
+
+if __name__ == '__main__':
+    tunnel()
