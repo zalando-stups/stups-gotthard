@@ -304,4 +304,7 @@ For troubleshooting, test the following command:
 
 
 if __name__ == '__main__':
-    tunnel()
+    try:
+        tunnel()
+    finally:
+        os.system('stty sane')
