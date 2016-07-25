@@ -310,8 +310,5 @@ For troubleshooting, test the following command:
     return out == b'', out.decode("utf-8")
 
 
-if __name__ == '__main__':
-    try:
-        tunnel()
-    finally:
-        os.system('stty sane')
+def main():
+    tunnel()
