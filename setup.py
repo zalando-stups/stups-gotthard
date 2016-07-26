@@ -25,9 +25,9 @@ def read_version(package):
 NAME = 'gotthard'
 MAIN_PACKAGE = 'gotthard'
 VERSION = read_version(MAIN_PACKAGE)
-DESCRIPTION = 'Simple command line utility to view Fullstop violations'
+DESCRIPTION = 'Command line utility to tunnel a PostgreSQL connection'
 LICENSE = 'Apache License 2.0'
-URL = 'https://github.com/zalando/stups-gotthard'
+URL = 'https://github.com/zalando-incubator/stups-gotthard'
 AUTHOR = 'Feike Steenbergen'
 EMAIL = 'feike.steenbergen@zalando.de'
 
@@ -123,7 +123,7 @@ def setup_package():
         author_email=EMAIL,
         license=LICENSE,
         keywords='gotthard spilo tunnel postgresql',
-        long_description=read('README.md'),
+        long_description=read('README.rst'),
         classifiers=CLASSIFIERS,
         test_suite='tests',
         packages=setuptools.find_packages(exclude=['tests', 'tests.*']),

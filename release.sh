@@ -26,7 +26,7 @@ if [ -z "$GO_PIPELINE_LABEL" ]; then
     git push
 fi
 
-#python3 setup.py sdist bdist_wheel upload
+python3 setup.py sdist bdist_wheel upload
 
 if [ -z "$GO_PIPELINE_LABEL" ]; then
 true
