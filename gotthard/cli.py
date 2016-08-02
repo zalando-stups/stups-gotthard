@@ -131,7 +131,7 @@ Some examples:
     ## Connect using url, using key value, or using parameters
     psql postgresql://{username}@localhost:{tunnel_port}/postgres?sslmode=require
     psql "host=localhost port={tunnel_port} user={username} sslmode=require dbname=postgres"
-    psql -h localhost -p ${tunnel_port} -U {username} -d postgres
+    psql -h localhost -p {tunnel_port} -U {username} -d postgres
 
     pg_dump --schema-only -h localhost -p {tunnel_port} -U {username} -d my_live_database
 
