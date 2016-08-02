@@ -9,14 +9,21 @@ import yaml
 import re
 import os
 import getpass
+import signal
 import subprocess
 import socket
 import time
 
 from click import ClickException
+from threading import Thread
 
 CONFIG_DIR_PATH = click.get_app_dir('piu')
 CONFIG_FILE_PATH = os.path.join(CONFIG_DIR_PATH, 'piu.yaml')
+
+
+
+def do_nothing(signum, frame):
+    pass
 
 
 def load_config(path, **kwargs):
@@ -144,7 +151,20 @@ WARNING: The ssh process keeps running in the background, so you should make sur
         env.setdefault('PGSSLMODE', 'require')
         env.setdefault('PGUSER', user)
         env.setdefault('PGDATABASE', 'postgres')
-        subprocess.call(command, env=env)
+
+        kwargs = {'args': command, 'env': env}
+
+        t = Thread(target=subprocess.call, kwargs=kwargs)
+
+        original_sigint = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, do_nothing)
+        try:
+            t.start()
+            t.join()
+        except KeyboardInterrupt:
+            pass
+
+        signal.signal(signal.SIGINT, original_sigint)
 
         logging.info("Terminating ssh tunnel (pid={})".format(process.pid))
         process.kill()
@@ -216,7 +236,7 @@ def setup_tunnel(user, odd_host, remote_host, remote_port, tunnel_port):
                    '{}@{}'.format(user, odd_host),
                    '-N']
 
-    process = subprocess.Popen(ssh_command)
+    process = subprocess.Popen(ssh_command, preexec_fn = os.setpgrp)
 
     logging.debug("Testing if tunnel is listening")
     for i in range(10):
