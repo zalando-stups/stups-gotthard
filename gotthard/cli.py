@@ -15,7 +15,6 @@ import socket
 import time
 
 from click import ClickException
-from threading import Thread
 
 CONFIG_DIR_PATH = click.get_app_dir('piu')
 CONFIG_FILE_PATH = os.path.join(CONFIG_DIR_PATH, 'piu.yaml')
@@ -152,17 +151,10 @@ WARNING: The ssh process keeps running in the background, so you should make sur
         env.setdefault('PGUSER', user)
         env.setdefault('PGDATABASE', 'postgres')
 
-        kwargs = {'args': command, 'env': env}
-
-        t = Thread(target=subprocess.call, kwargs=kwargs)
-
         original_sigint = signal.getsignal(signal.SIGINT)
         signal.signal(signal.SIGINT, do_nothing)
-        try:
-            t.start()
-            t.join()
-        except KeyboardInterrupt:
-            pass
+
+        subprocess.call(args=command, env=env)
 
         signal.signal(signal.SIGINT, original_sigint)
 
