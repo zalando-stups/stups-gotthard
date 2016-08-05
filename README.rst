@@ -2,7 +2,7 @@
 Gotthard
 ========
 Gotthard is a command line tool to simplify connecting to a PostgreSQL instance via a bastion_ host.
-This tool is created in the context of zalando-stups_, however it does not depend on it.
+This tool is created in the context of zalando-stups_, however it could be used without it.
 
 .. contents::
     :local:
@@ -66,7 +66,14 @@ This does however require you to be logged in to your AWS account, as we need to
 
 How does it actually work
 ================
-The way Gotthard works is by exporting the PostgreSQL related `Environment Variables`_ to the process it needs to run. Most PostgreSQL client tools will use these environment variables to connect, so running a python script would also work.
+The way Gotthard works is by setting up an ssh tunnel to the bastion host.
+It chooses the local port specified a free local port to tunnel the requests to remote side to port 5432.
+
+When running in the background, it's task is done: It will report back the details of the tunnel.
+
+When running in the foregroed, Gotthard will export the PostgreSQL related `Environment Variables`_ to the process
+it needs to run. Most PostgreSQL client tools will use these environment variables to connect, most of your python or
+perl scripts should adhere to these variables as well.
 
 .. code-block:: bash
 
