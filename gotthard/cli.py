@@ -42,12 +42,14 @@ def load_config(path, **kwargs):
 Examples:
 
 \b
-    $ ./gotthard 172.31.150.202 pg_isready
+    $ gotthard 172.31.150.202 pg_isready
     localhost:50474 - accepting connections
 
 \b
-    $ ./gotthard mydb.team.example.com -- psql -c "SELECT clock_timestamp(), current_user" -XAt
+    $ gotthard mydb.team.example.com -- psql -c "SELECT clock_timestamp(), current_user" -XAt
     2016-06-03 09:21:14.68289+00|myuser
+
+    $ gotthard mydb.team.example.com
 """)
 @click.option('--config-file', '-c', help='Use alternative piu configuration file', default=CONFIG_FILE_PATH,
               metavar='PATH')
@@ -62,9 +64,19 @@ Examples:
 @click.argument('remote_host', nargs=1, metavar='DBHOSTNAME')
 @click.argument('command', nargs=-1, metavar='[--] COMMAND [arg1] [argn]')
 def tunnel(config_file, odd_host, user, remote_host, port, command, verbose, local_port, reason, option, region):
-    """Gotthard allows you to dig a base tunnel. It requires access to your odd host to be able to do its work.
+    """Gotthard allows you to dig a base tunnel through a bastion (Stups: odd) host.
 
-       When specifying a COMMAND, the command specified will be executed and afterwards the tunnel will be closed."""
+       It can run in 2 different modes: in the foreground and in the background.
+       If you specify a COMMAND to execute it will run in foreground mode.
+
+       When running in the background, gotthard establishes a tunnel in the background and terminates.
+       When running in the foreground, the tunnel is established and the COMMAND you specify is executed.
+       Once your COMMAND finishes, the tunnel is closed.
+       If you need to pass options to the command, you will have to add the -- to signify that the following options
+       should not be interpreted by gotthard.
+       """
+
+
 
     loglevel = os.environ.get('LOGLEVEL', 'WARNING').upper() if not verbose else 'DEBUG'
     logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=loglevel)
@@ -125,32 +137,37 @@ Optionally, provide the --reason option to autimatically try to get access.
     config['port'] = port
     config['tunnel_port'] = tunnel_port
 
+    env = dict(os.environ)
+    env['PGPORT'] = str(tunnel_port)
+    env['PGHOST'] = 'localhost'
+    env.setdefault('PGSSLMODE', 'require')
+    env.setdefault('PGUSER', user)
+    env.setdefault('PGDATABASE', 'postgres')
+    env.setdefault('GOTTHARDPID', process.pid)
+
+    export_keys = ['PGPORT', 'PGHOST', 'PGSSLMODE', 'PGUSER', 'PGDATABASE', 'GOTTHARDPID']
+    config['export_vars'] = '\n'.join(['export {}="{}"'.format(k, v) for k, v in env.items() if k in export_keys])
+
     if not command:
         click.echo("""\
-Tunnel established, you can now use the tunnel with your favourite tools.
-
-
-Process pid: {pid} is listening on localhost:{tunnel_port}
-
-Some examples:
-
-    ## Connect using url, using key value, or using parameters
-    psql postgresql://{username}@localhost:{tunnel_port}/postgres?sslmode=require
-    psql "host=localhost port={tunnel_port} user={username} sslmode=require dbname=postgres"
-    psql -h localhost -p {tunnel_port} -U {username} -d postgres
-
-    pg_dump --schema-only -h localhost -p {tunnel_port} -U {username} -d my_live_database
-
-WARNING: The ssh process keeps running in the background, so you should make sure to clean up sometimes
+# Tunnel established, you can now use the tunnel with your favourite tools.
+#
+# Process pid: {pid} is listening on localhost:{tunnel_port}
+#
+# You can use the following environment variables to connect using the tunnel:
+{export_vars}
+# Some examples:
+#
+#    ## Connect using url, using key value, or using parameters
+#    psql postgresql://{username}@localhost:{tunnel_port}/postgres?sslmode=require
+#    psql "host=localhost port={tunnel_port} user={username} sslmode=require dbname=postgres"
+#    psql -h localhost -p {tunnel_port} -U {username} -d postgres
+#
+#    pg_dump --schema-only -h localhost -p {tunnel_port} -U {username} -d my_live_database
+#
+# WARNING: The ssh process with pid {pid} keeps running in the background, so you should make sure to terminate it if not needed anymore.
 """.format(**config))
     else:
-        env = dict(os.environ)
-        env['PGPORT'] = str(tunnel_port)
-        env['PGHOST'] = 'localhost'
-        env.setdefault('PGSSLMODE', 'require')
-        env.setdefault('PGUSER', user)
-        env.setdefault('PGDATABASE', 'postgres')
-
         original_sigint = signal.getsignal(signal.SIGINT)
         signal.signal(signal.SIGINT, do_nothing)
 
