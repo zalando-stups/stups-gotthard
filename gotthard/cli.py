@@ -143,7 +143,7 @@ Optionally, provide the --reason option to autimatically try to get access.
     env.setdefault('PGSSLMODE', 'require')
     env.setdefault('PGUSER', user)
     env.setdefault('PGDATABASE', 'postgres')
-    env.setdefault('GOTTHARDPID', process.pid)
+    env.setdefault('GOTTHARDPID', str(process.pid))
 
     export_keys = ['PGPORT', 'PGHOST', 'PGSSLMODE', 'PGUSER', 'PGDATABASE', 'GOTTHARDPID']
     config['export_vars'] = '\n'.join(['export {}="{}"'.format(k, v) for k, v in env.items() if k in export_keys])
