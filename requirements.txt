@@ -1,1 +1,2 @@
 clickclick>=1.0
+boto3
