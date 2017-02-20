@@ -224,12 +224,12 @@ def get_remote_host(remote_host, regions):
         logging.warning(ce.response['Error']['Code'])
         if ce.response['Error']['Code'] in ['ExpiredToken', 'RequestExpired']:
             raise ClickException('\nAWS credentials have expired.\n' +
-                                 'Use the "mai" command line tool to get a new temporary access key.')
+                                 'Use the "zaws login" command line tool to get a new temporary access key.')
         else:
             raise ce
     except NoCredentialsError:
         raise ClickException('\nNo AWS credentials found.\n' +
-                             'Use the "mai" command line tool to get a temporary access key\n')
+                             'Use the "zaws login" command line tool to get a temporary access key\n')
 
 
 def setup_tunnel(user, odd_host, remote_host, remote_port, tunnel_port):
