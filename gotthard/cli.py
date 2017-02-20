@@ -222,12 +222,12 @@ def get_remote_host(remote_host, regions):
         logging.warning(ce.response['Error']['Code'])
         if ce.response['Error']['Code'] in ['ExpiredToken', 'RequestExpired']:
             raise ClickException('\nAWS credentials have expired.\n' +
-                                 'Use the "zaws login" command line tool to get a new temporary access key.')
+                                 'Use the "zaws require" command line tool to get a new temporary access key.')
         else:
             raise ce
     except NoCredentialsError:
         raise ClickException('\nNo AWS credentials found.\n' +
-                             'Use the "zaws login" command line tool to get a temporary access key\n')
+                             'Use the "zaws require" command line tool to get a temporary access key\n')
 
 
 def setup_tunnel(user, odd_host, remote_host, remote_port, tunnel_port):
@@ -305,23 +305,17 @@ def get_spilo_stacks(cf, spilo_cluster):
                     'UPDATE_ROLLBACK_IN_PROGRESS', 'UPDATE_ROLLBACK_FAILED',
                     'UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS', 'UPDATE_ROLLBACK_COMPLETE']
 
-    next_token = None
-    while True:
-        # AWS emits output in chunks, loop until we examine all of them.
-        current_chunk = cf.list_stacks(StackStatusFilter=stack_status) if not next_token \
-            else cf.list_stacks(StackStatusFilter=stack_status, NextToken=next_token)
+    paginator = cf.get_paginator('list_stacks')
+    stacks = paginator.paginate(StackStatusFilter=stack_status,
+                                PaginationConfig = {'MaxItems': 10000}).build_full_result()['StackSummaries']
 
-        next_token = current_chunk.get('NextToken')
-        for stack in current_chunk['StackSummaries']:
-            stack_name = stack['StackName']
-            if not spilo_cluster or stack_name.split('-')[-1] == spilo_cluster:
-                desc = cf.describe_stacks(StackName=stack_name)['Stacks'][0]
-                for k, v in {i['Key']: i['Value'] for i in desc['Tags']}.items():
-                    if k == 'SpiloCluster' and (not spilo_cluster or v == spilo_cluster):
-                        yield stack_name
-
-        if not next_token:
-            break
+    for stack in stacks:
+        stack_name = stack['StackName']
+        if not spilo_cluster or stack_name.split('-')[-1] == spilo_cluster:
+            desc = cf.describe_stacks(StackName=stack_name)['Stacks'][0]
+            for k, v in {i['Key']: i['Value'] for i in desc['Tags']}.items():
+                if k == 'SpiloCluster' and (not spilo_cluster or    v == spilo_cluster):
+                    yield stack_name
 
 
 def test_ssh(user, odd_host, remote_host, remote_port):
