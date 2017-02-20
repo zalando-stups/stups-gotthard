@@ -20,7 +20,6 @@ CONFIG_DIR_PATH = click.get_app_dir('piu')
 CONFIG_FILE_PATH = os.path.join(CONFIG_DIR_PATH, 'piu.yaml')
 
 
-
 def do_nothing(signum, frame):
     pass
 
@@ -37,6 +36,7 @@ def load_config(path, **kwargs):
             config[k] = v
 
     return config
+
 
 @click.command(epilog="""
 Examples:
@@ -75,8 +75,6 @@ def tunnel(config_file, odd_host, user, remote_host, port, command, verbose, loc
        If you need to pass options to the command, you will have to add the -- to signify that the following options
        should not be interpreted by gotthard.
        """
-
-
 
     loglevel = os.environ.get('LOGLEVEL', 'WARNING').upper() if not verbose else 'DEBUG'
     logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=loglevel)
@@ -165,7 +163,7 @@ Optionally, provide the --reason option to autimatically try to get access.
 #
 #    pg_dump --schema-only -h localhost -p {tunnel_port} -U {username} -d my_live_database
 #
-# WARNING: The ssh process with pid {pid} keeps running in the background, so you should make sure to terminate it if not needed anymore.
+# WARNING: The ssh process with pid {pid} keeps running in the background. Terminate it if not needed anymore.
 """.format(**config))
     else:
         original_sigint = signal.getsignal(signal.SIGINT)
@@ -245,7 +243,7 @@ def setup_tunnel(user, odd_host, remote_host, remote_port, tunnel_port):
                    '{}@{}'.format(user, odd_host),
                    '-N']
 
-    process = subprocess.Popen(ssh_command, preexec_fn = os.setpgrp)
+    process = subprocess.Popen(ssh_command, preexec_fn=os.setpgrp)
 
     logging.debug("Testing if tunnel is listening")
     for i in range(10):
