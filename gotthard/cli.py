@@ -314,7 +314,7 @@ def get_spilo_stacks(cf, spilo_cluster):
         if not spilo_cluster or stack_name.split('-')[-1] == spilo_cluster:
             desc = cf.describe_stacks(StackName=stack_name)['Stacks'][0]
             for k, v in {i['Key']: i['Value'] for i in desc['Tags']}.items():
-                if k == 'SpiloCluster' and (not spilo_cluster or    v == spilo_cluster):
+                if k == 'SpiloCluster' and (not spilo_cluster or v == spilo_cluster):
                     yield stack_name
 
 
