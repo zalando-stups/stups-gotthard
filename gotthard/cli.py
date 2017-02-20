@@ -307,13 +307,23 @@ def get_spilo_stacks(cf, spilo_cluster):
                     'UPDATE_ROLLBACK_IN_PROGRESS', 'UPDATE_ROLLBACK_FAILED',
                     'UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS', 'UPDATE_ROLLBACK_COMPLETE']
 
-    for stack in cf.list_stacks(StackStatusFilter=stack_status)['StackSummaries']:
-        stack_name = stack['StackName']
-        if not spilo_cluster or stack_name.split('-')[-1] == spilo_cluster:
-            desc = cf.describe_stacks(StackName=stack_name)['Stacks'][0]
-            for k, v in {i['Key']: i['Value'] for i in desc['Tags']}.items():
-                if k == 'SpiloCluster' and (not spilo_cluster or v == spilo_cluster):
-                    yield stack_name
+    next_token = None
+    while True:
+        # AWS emits output in chunks, loop until we examine all of them.
+        current_chunk = cf.list_stacks(StackStatusFilter=stack_status) if not next_token \
+            else cf.list_stacks(StackStatusFilter=stack_status, NextToken=next_token)
+
+        next_token = current_chunk.get('NextToken')
+        for stack in current_chunk['StackSummaries']:
+            stack_name = stack['StackName']
+            if not spilo_cluster or stack_name.split('-')[-1] == spilo_cluster:
+                desc = cf.describe_stacks(StackName=stack_name)['Stacks'][0]
+                for k, v in {i['Key']: i['Value'] for i in desc['Tags']}.items():
+                    if k == 'SpiloCluster' and (not spilo_cluster or v == spilo_cluster):
+                        yield stack_name
+
+        if not next_token:
+            break
 
 
 def test_ssh(user, odd_host, remote_host, remote_port):
