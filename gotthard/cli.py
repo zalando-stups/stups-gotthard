@@ -55,6 +55,7 @@ Examples:
               metavar='PATH')
 @click.option('-O', '--odd-host', help='Odd SSH bastion hostname', envvar='ODD_HOST', metavar='HOSTNAME')
 @click.option('-U', '--user', help='Username to use for connecting', envvar='PIU_USER', metavar='NAME')
+@click.option('-S', '--spilo-stack-name', help='Name for spilo stacks', default="spilo", type=str)
 @click.option('-p', '--port', help='Remote port to use', default=5432, type=int)
 @click.option('-l', '--local-port', help='The local port to use for the tunnel', type=int, metavar='PORT')
 @click.option('-r', '--reason', help='If specified, request access using REASON', type=str, metavar='REASON')
@@ -63,7 +64,8 @@ Examples:
 @click.option('-v', '--verbose', is_flag=True, help='Enable DEBUG logging')
 @click.argument('remote_host', nargs=1, metavar='DBHOSTNAME')
 @click.argument('command', nargs=-1, metavar='[--] COMMAND [arg1] [argn]')
-def tunnel(config_file, odd_host, user, remote_host, port, command, verbose, local_port, reason, option, region):
+def tunnel(config_file, odd_host, user, spilo_stack_name, remote_host, port, command, verbose, local_port,
+           reason, option, region):
     """Gotthard allows you to dig a base tunnel through a bastion (Stups: odd) host.
 
        It can run in 2 different modes: in the foreground and in the background.
@@ -91,7 +93,7 @@ def tunnel(config_file, odd_host, user, remote_host, port, command, verbose, loc
         raise ClickException('No odd-host found in configuration')
 
     logging.info(region)
-    remote_host, region = get_remote_host(remote_host, region)
+    remote_host, region = get_remote_host(remote_host, region, spilo_stack_name)
 
     if region:
         config['odd_host'] = re.sub('^odd-[^\.]+', 'odd-{}'.format(region), config['odd_host'])
@@ -177,7 +179,7 @@ Optionally, provide the --reason option to autimatically try to get access.
         process.kill()
 
 
-def get_remote_host(remote_host, regions):
+def get_remote_host(remote_host, regions, spilo_stack_name):
     # We allow instance ids or stack names to be specified
     # If it looks like one, we will try to get a host and port using boto3
     # Spilo member names replace - with _, so we accept instance id's with both
@@ -196,7 +198,7 @@ def get_remote_host(remote_host, regions):
                 logging.debug("Trying to find Spilo {} in region {}".format(remote_host, region))
                 cf = boto3.client('cloudformation', region)
                 elb = boto3.client('elb', region)
-                ec2_instance_id = get_spilo_master(cf, elb, remote_host)
+                ec2_instance_id = get_spilo_master(cf, elb, spilo_stack_name, remote_host)
                 if ec2_instance_id is not None:
                     break
             if ec2_instance_id is None:
@@ -285,10 +287,10 @@ def get_instance_ip(ec2, instance_id, region):
             return i['PrivateIpAddress']
 
 
-def get_spilo_master(cf, elb, spilo_cluster):
+def get_spilo_master(cf, elb, spilo_stack_name, spilo_cluster):
     logging.debug('Trying to find Spilo {}'.format(spilo_cluster))
 
-    candidates = get_spilo_stacks(cf, spilo_cluster)
+    candidates = get_spilo_stacks(cf, spilo_stack_name, spilo_cluster)
     for c in candidates:
         for res in cf.describe_stack_resources(StackName=c, LogicalResourceId='PostgresLoadBalancer')['StackResources']:
             logging.debug(yaml.dump(res, default_flow_style=False))
@@ -300,22 +302,25 @@ def get_spilo_master(cf, elb, spilo_cluster):
             raise ClickException('No running master found for Spilo {}, members: {}'.format(spilo_cluster, instances))
 
 
-def get_spilo_stacks(cf, spilo_cluster):
-    stack_status = ['CREATE_COMPLETE', 'UPDATE_IN_PROGRESS', 'UPDATE_COMPLETE_CLEANUP_IN_PROGRESS', 'UPDATE_COMPLETE',
-                    'UPDATE_ROLLBACK_IN_PROGRESS', 'UPDATE_ROLLBACK_FAILED',
-                    'UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS', 'UPDATE_ROLLBACK_COMPLETE']
+def get_spilo_stacks(cf, spilo_stack_name, spilo_cluster):
+    allowed_stack_statuses = ['CREATE_COMPLETE', 'UPDATE_IN_PROGRESS', 'UPDATE_COMPLETE_CLEANUP_IN_PROGRESS',
+                              'UPDATE_COMPLETE', 'UPDATE_ROLLBACK_IN_PROGRESS', 'UPDATE_ROLLBACK_FAILED',
+                              'UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS', 'UPDATE_ROLLBACK_COMPLETE']
+    spilo_tag = 'SpiloCluster'
 
-    paginator = cf.get_paginator('list_stacks')
-    stacks = paginator.paginate(StackStatusFilter=stack_status,
-                                PaginationConfig = {'PageSize': 10000}).build_full_result()['StackSummaries']
-
+    full_stack_name = '{0}-{1}'.format(spilo_stack_name, spilo_cluster)
+    stacks = cf.describe_stacks(StackName=full_stack_name)['Stacks']
     for stack in stacks:
         stack_name = stack['StackName']
-        if not spilo_cluster or stack_name.split('-')[-1] == spilo_cluster:
-            desc = cf.describe_stacks(StackName=stack_name)['Stacks'][0]
-            for k, v in {i['Key']: i['Value'] for i in desc['Tags']}.items():
-                if k == 'SpiloCluster' and (not spilo_cluster or v == spilo_cluster):
+        if stack['StackStatus'] not in allowed_stack_statuses:
+            logging.warning("Ignoring stack {0} with status {1}".format(full_stack_name, stack['StackStatus']))
+        else:
+            for t in stack['Tags']:
+                if t['Key'] == spilo_tag and (not spilo_cluster or t['Value'] == spilo_cluster):
                     yield stack_name
+                    break
+            else:
+                logging.warning("Ignoring stack {0} without matching {1} tag".format(full_stack_name, spilo_tag))
 
 
 def test_ssh(user, odd_host, remote_host, remote_port):
