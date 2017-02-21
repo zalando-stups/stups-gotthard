@@ -307,7 +307,7 @@ def get_spilo_stacks(cf, spilo_cluster):
 
     paginator = cf.get_paginator('list_stacks')
     stacks = paginator.paginate(StackStatusFilter=stack_status,
-                                PaginationConfig = {'MaxItems': 10000}).build_full_result()['StackSummaries']
+                                PaginationConfig = {'PageSize': 10000}).build_full_result()['StackSummaries']
 
     for stack in stacks:
         stack_name = stack['StackName']
