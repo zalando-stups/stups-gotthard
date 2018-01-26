@@ -124,7 +124,7 @@ For example, to request access for 3 hours to fix an incident:
 
     piu request-access {odd_host} --lifetime 180 "Fixing incident INC-123"
 
-Optionally, provide the --reason option to autimatically try to get access.
+Optionally, provide the --reason option to automatically try to get access.
 """.format(**config))
         else:
             raise Exception(output)
